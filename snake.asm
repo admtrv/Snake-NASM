@@ -113,70 +113,22 @@ section .text
     global _start
 
 _start:
-    ; init random seed with time
-    mov rax, SYS_TIME
-    xor rdi, rdi
-    syscall
-    mov [rand_seed], eax
-
-    ; save termios
-    mov rax, SYS_IOCTL
-    mov rdi, STDIN
-    mov rsi, TCGETS
-    lea rdx, [t_old]
-    syscall
-
-    ; copy t_old -> t_new
-    lea rsi, [t_old]
-    lea rdi, [t_new]
-    mov rcx, TERMIOS_SZ     
-    cld
-    rep movsb
-
-    ; raw mode
-    mov eax, [t_new + OFF_LFLAG]
-    and eax, ~(ICANON | ECHO | ISIG)
-    mov [t_new + OFF_LFLAG], eax
+    ; initialize random seed
+    call init_random
     
-    mov eax, [t_new + OFF_IFLAG]
-    and eax, ~IXON
-    mov [t_new + OFF_IFLAG], eax
-
-    mov byte [t_new + OFF_CC + VMIN], 1  ; wait for 1 character
-    mov byte [t_new + OFF_CC + VTIME], 0
-
-    ; apply new termios
-    mov rax, SYS_IOCTL
-    mov rdi, STDIN
-    mov rsi, TCSETS
-    lea rdx, [t_new]
-    syscall
-
-    ; hide cursor
-    lea rsi,[esc_hide]
-    call write_line
-
-    ; clear terminal
-    lea rsi,[esc_clear]
-    call write_line
-
-    ; show splash screen
+    ; setup terminal
+    call setup_terminal
+    
+    ; setup display
+    call setup_display
+    
+    ; show splash screen and wait for input
     call show_splash
-
-    ; wait for any key press
     call wait_key_press
-
-    ; set non-blocking mode for game
-    mov byte [t_new + OFF_CC + VMIN], 0  ; non-blocking
-    mov byte [t_new + OFF_CC + VTIME], 0
-
-    ; apply non-blocking termios
-    mov rax, SYS_IOCTL
-    mov rdi, STDIN
-    mov rsi, TCSETS
-    lea rdx, [t_new]
-    syscall
-
+    
+    ; switch to non-blocking mode for game
+    call setup_nonblocking_mode
+    
     ; init game
     call init_game
 
@@ -273,18 +225,91 @@ _start:
     jmp .loop
 
 .exit:
-    ; show cursor
-    lea rsi,[esc_show]
+    call cleanup_and_exit
+
+; initialize random seed with current time
+init_random:
+    mov rax, SYS_TIME
+    xor rdi, rdi
+    syscall
+    mov [rand_seed], eax
+    ret
+
+; setup terminal for raw mode
+setup_terminal:
+    ; save current termios settings
+    mov rax, SYS_IOCTL
+    mov rdi, STDIN
+    mov rsi, TCGETS
+    lea rdx, [t_old]
+    syscall
+
+    ; copy old settings to new
+    lea rsi, [t_old]
+    lea rdi, [t_new]
+    mov rcx, TERMIOS_SZ     
+    cld
+    rep movsb
+
+    ; configure for raw mode (blocking initially)
+    mov eax, [t_new + OFF_LFLAG]
+    and eax, ~(ICANON | ECHO | ISIG)
+    mov [t_new + OFF_LFLAG], eax
+    
+    mov eax, [t_new + OFF_IFLAG]
+    and eax, ~IXON
+    mov [t_new + OFF_IFLAG], eax
+
+    mov byte [t_new + OFF_CC + VMIN], 1  ; wait for 1 character
+    mov byte [t_new + OFF_CC + VTIME], 0
+
+    ; apply new termios settings
+    mov rax, SYS_IOCTL
+    mov rdi, STDIN
+    mov rsi, TCSETS
+    lea rdx, [t_new]
+    syscall
+    ret
+
+; setup display (hide cursor, clear screen)
+setup_display:
+    ; hide cursor
+    lea rsi, [esc_hide]
     call write_line
 
-    ; restore termios
+    ; clear terminal
+    lea rsi, [esc_clear]
+    call write_line
+    ret
+
+; switch terminal to non-blocking mode for game
+setup_nonblocking_mode:
+    ; set non-blocking mode
+    mov byte [t_new + OFF_CC + VMIN], 0  ; non-blocking
+    mov byte [t_new + OFF_CC + VTIME], 0
+
+    ; apply non-blocking termios
+    mov rax, SYS_IOCTL
+    mov rdi, STDIN
+    mov rsi, TCSETS
+    lea rdx, [t_new]
+    syscall
+    ret
+
+; cleanup and exit program
+cleanup_and_exit:
+    ; show cursor
+    lea rsi, [esc_show]
+    call write_line
+
+    ; restore original termios settings
     mov rax, SYS_IOCTL
     mov rdi, STDIN
     mov rsi, TCSETS
     lea rdx, [t_old]
     syscall
 
-    ; exit
+    ; exit program
     mov rax, SYS_EXIT
     xor rdi, rdi
     syscall
@@ -518,21 +543,7 @@ move_snake:
     syscall
 
 .exit_program:
-    ; show cursor
-    lea rsi,[esc_show]
-    call write_line
-
-    ; restore termios
-    mov rax, SYS_IOCTL
-    mov rdi, STDIN
-    mov rsi, TCSETS
-    lea rdx, [t_old]
-    syscall
-
-    ; exit
-    mov rax, SYS_EXIT
-    xor rdi, rdi
-    syscall
+    call cleanup_and_exit
 
 ; check if head collides with snake body
 ; returns edx = 1 if collision, 0 otherwise
