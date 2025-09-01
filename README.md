@@ -22,7 +22,7 @@ sudo apt install -y nasm make binutils
 
 The project includes a ready Makefile with these targets:
 
-* `make / make all` - build the binary
+* `make` / `make all` - build the binary
 * `make run` - build and run
 * `make clean` - remove objects and the binary
 
