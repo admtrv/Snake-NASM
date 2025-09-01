@@ -50,6 +50,9 @@
 %define DIR_DOWN  2
 %define DIR_LEFT  3
 
+; winning condition - fill entire field
+%define WIN_LENGTH   (W * H)
+
 section .data
     ; esc sequences
     esc_hide  db 0x1B, "[?25l", SLASH_0
@@ -77,6 +80,8 @@ section .data
     ; strings
     msg_keys  db "Move: wasd, Quit: q", SLASH_N, SLASH_0
     msg_score db "Score: ", SLASH_0
+    msg_win   db "You win! Score: ", SLASH_0
+    msg_lose  db "You lose! Score: ", SLASH_0
 
 section .bss
     ; buffer for termios settings
@@ -441,7 +446,7 @@ move_snake:
     pop rbx
     pop rax
     cmp edx, 1
-    je .exit_game
+    je .lose_game
     
     ; check food
     cmp ax, [food_x]
@@ -455,24 +460,75 @@ move_snake:
     mov [snake_y + ecx*2], r9w  ; restore old tail y
     inc dword [len]
     inc dword [score]
+    
+    ; check win condition
+    mov eax, [len]
+    cmp eax, WIN_LENGTH
+    jge .win_game
+    
     call generate_food
     
 .done:
     ret
 
-; exit program on collision    
-.exit_game:
+.lose_game:
+    ; show final field one more time
+    lea rsi, [esc_home]
+    call write_line
+    call print_keys
+    call draw_field
+    
+    ; show lose message
+    lea rsi, [msg_lose]
+    call write_line
+    mov eax, [score]
+    call print_number
+    
+    ; print newline
+    mov rax, SYS_WRITE
+    mov rdi, STDOUT
+    lea rsi, [buf]
+    mov byte [rsi], SLASH_N
+    mov byte [rsi+1], SLASH_0
+    mov rdx, 1
+    syscall
+    
+    jmp .exit_program
+
+.win_game:
+    ; show final field one more time
+    lea rsi, [esc_home]
+    call write_line
+    call print_keys
+    call draw_field
+    
+    ; show win message
+    lea rsi, [msg_win]
+    call write_line
+    mov eax, [score]
+    call print_number
+    
+    ; print newline
+    mov rax, SYS_WRITE
+    mov rdi, STDOUT
+    lea rsi, [buf]
+    mov byte [rsi], SLASH_N
+    mov byte [rsi+1], SLASH_0
+    mov rdx, 1
+    syscall
+
+.exit_program:
     ; show cursor
     lea rsi,[esc_show]
     call write_line
-    
+
     ; restore termios
     mov rax, SYS_IOCTL
     mov rdi, STDIN
     mov rsi, TCSETS
     lea rdx, [t_old]
     syscall
-    
+
     ; exit
     mov rax, SYS_EXIT
     xor rdi, rdi
